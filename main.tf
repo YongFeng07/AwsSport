@@ -66,7 +66,7 @@ module "asg" {
   private_subnet_ids = module.vpc.private_subnet_ids
   ec2_sg_id          = module.security_groups.ec2_sg_id
   target_group_arn   = module.alb.target_group_arn
-  instance_type      = "t3.medium"
+  instance_type      = "t3.micro"
   secret_arn         = module.secrets.secret_arn
   artifact_bucket    = module.s3.bucket_id
   aws_region         = var.aws_region
