@@ -1,9 +1,17 @@
 variable "name_prefix" {
+  description = "Prefix applied to all resource names in this module."
   type        = string
-  description = "Resource name prefix"
+  default     = "assignment"
 }
 
 variable "bucket_name" {
+  description = "Globally-unique S3 bucket name for uploaded event images."
   type        = string
-  description = "Name of the S3 bucket"
+  default     = "sports-facility-booking-s3"   
+}
+
+variable "public_read_prefix" {
+  description = "Object key prefix (glob) that is publicly readable, e.g. uploads/*."
+  type        = string
+  default     = "uploads/*"
 }

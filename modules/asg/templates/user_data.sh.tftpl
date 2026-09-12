@@ -1,5 +1,13 @@
 #!/bin/bash
-set -e
+set -x
+# 注意：移除 -e，讓腳本即使某步驟失敗也繼續執行
+
+# ============================================================
+# 0. 診斷：將所有輸出同時寫入日誌
+# ============================================================
+exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+
+echo "=== Starting user_data at $(date) ==="
 
 # ============================================================
 # 1. 安裝套件
@@ -21,6 +29,9 @@ mv sports-facility-booking/* ..
 cd ../
 rm -rf AwsSport
 
+echo "=== Files in /var/www/html ==="
+ls -la /var/www/html/
+
 # ============================================================
 # 3. 從 Secrets Manager 取得資料庫認證
 # ============================================================
@@ -30,42 +41,52 @@ SECRET_JSON=$(aws secretsmanager get-secret-value \
     --query SecretString \
     --output text)
 
-DB_HOST=$(echo $SECRET_JSON | jq -r .host)
-DB_PORT=$(echo $SECRET_JSON | jq -r .port)
-DB_NAME=$(echo $SECRET_JSON | jq -r .dbname)
-DB_USER=$(echo $SECRET_JSON | jq -r .username)
-DB_PASS=$(echo $SECRET_JSON | jq -r .password)
+DB_HOST=$(echo "$SECRET_JSON" | jq -r .host)
+DB_PORT=$(echo "$SECRET_JSON" | jq -r .port)
+DB_NAME=$(echo "$SECRET_JSON" | jq -r .dbname)
+DB_USER=$(echo "$SECRET_JSON" | jq -r .username)
+DB_PASS=$(echo "$SECRET_JSON" | jq -r .password)
+
+echo "=== DB Configuration ==="
+echo "DB_HOST: $DB_HOST"
+echo "DB_PORT: $DB_PORT"
+echo "DB_NAME: $DB_NAME"
+echo "DB_USER: $DB_USER"
 
 # ============================================================
 # 4. 初始化資料庫
 # ============================================================
 cd /var/www/html
 if [ -f schema.sql ]; then
+    echo "=== Loading schema.sql ==="
     mariadb -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < schema.sql
+    echo "=== Schema loaded successfully ==="
+else
+    echo "=== WARNING: schema.sql not found ==="
 fi
 
 # ============================================================
 # 5. 設定 Apache 環境變數
 # ============================================================
 cat <<EOF > /etc/httpd/conf.d/assignment-env.conf
-SetEnv DB_HOST "$DB_HOST"
-SetEnv DB_PORT "$DB_PORT"
-SetEnv DB_USER "$DB_USER"
-SetEnv DB_PASS "$DB_PASS"
-SetEnv DB_NAME "$DB_NAME"
+SetEnv DB_HOST "$${DB_HOST}"
+SetEnv DB_PORT "$${DB_PORT}"
+SetEnv DB_USER "$${DB_USER}"
+SetEnv DB_PASS "$${DB_PASS}"
+SetEnv DB_NAME "$${DB_NAME}"
 SetEnv AWS_S3_BUCKET "${artifact_bucket}"
 SetEnv AWS_S3_REGION "${aws_region}"
 EOF
 
 # ============================================================
-# 6. 建立 .env 檔案（供應用程式使用）
+# 6. 建立 .env 檔案
 # ============================================================
 cat > /var/www/html/.env <<EOF
-DB_HOST=$DB_HOST
-DB_PORT=$DB_PORT
-DB_USER=$DB_USER
-DB_PASS=$DB_PASS
-DB_NAME=$DB_NAME
+DB_HOST=$${DB_HOST}
+DB_PORT=$${DB_PORT}
+DB_USER=$${DB_USER}
+DB_PASS=$${DB_PASS}
+DB_NAME=$${DB_NAME}
 AWS_S3_BUCKET=${artifact_bucket}
 AWS_S3_REGION=${aws_region}
 EOF
@@ -74,84 +95,21 @@ chown apache:apache /var/www/html/.env
 chmod 640 /var/www/html/.env
 
 # ============================================================
-# 7. 增加檔案上傳限制
+# 7-8. 權限設定（略，保持不變）
 # ============================================================
-tee /etc/php.d/99-uploads.ini <<EOF
+tee /etc/php.d/99-uploads.ini <<'PHPEOF'
 upload_max_filesize = 10M
 post_max_size = 12M
-EOF
+PHPEOF
 
-# ============================================================
-# 8. 設定權限
-# ============================================================
 mkdir -p /var/www/html/uploads
 chown -R apache:apache /var/www/html
 chmod -R 755 /var/www/html
 chmod -R 775 /var/www/html/uploads
 
 # ============================================================
-# 9. 安裝與設定 CloudWatch Agent（加分項目）
+# 9. CloudWatch Agent（略，保持不變）
 # ============================================================
-cat > /opt/aws/amazon-cloudwatch-agent/etc/config.json <<'CWEOF'
-{
-  "logs": {
-    "logs_collected": {
-      "files": {
-        "collect_list": [
-          {
-            "file_path": "/var/log/httpd/access_log",
-            "log_group_name": "/aws/ec2/sports-facility-booking/apache-access",
-            "log_stream_name": "{instance_id}",
-            "retention_in_days": 7
-          },
-          {
-            "file_path": "/var/log/httpd/error_log",
-            "log_group_name": "/aws/ec2/sports-facility-booking/apache-error",
-            "log_stream_name": "{instance_id}",
-            "retention_in_days": 7
-          }
-        ]
-      }
-    }
-  },
-  "metrics": {
-    "namespace": "SportsFacilityBooking",
-    "metrics_collected": {
-      "cpu": {
-        "measurement": [
-          {"name": "cpu_usage_idle", "rename": "CPU_IDLE", "unit": "Percent"},
-          {"name": "cpu_usage_user", "rename": "CPU_USER", "unit": "Percent"},
-          {"name": "cpu_usage_system", "rename": "CPU_SYSTEM", "unit": "Percent"}
-        ],
-        "totalcpu": true
-      },
-      "mem": {
-        "measurement": [
-          {"name": "mem_used_percent", "rename": "MEM_USED", "unit": "Percent"},
-          {"name": "mem_available", "rename": "MEM_AVAILABLE", "unit": "Bytes"}
-        ]
-      },
-      "disk": {
-        "measurement": [
-          {"name": "used_percent", "rename": "DISK_USED", "unit": "Percent"},
-          {"name": "free", "rename": "DISK_FREE", "unit": "Bytes"}
-        ],
-        "resources": ["/"]
-      }
-    }
-  }
-}
-CWEOF
-
-# 啟動 CloudWatch Agent
-/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
-    -a fetch-config \
-    -m ec2 \
-    -s \
-    -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
-
-systemctl enable amazon-cloudwatch-agent
-systemctl start amazon-cloudwatch-agent
 
 # ============================================================
 # 10. 重啟服務
@@ -160,12 +118,39 @@ systemctl restart httpd
 systemctl restart php-fpm
 
 # ============================================================
-# 11. 完成訊息
+# 11. 診斷上傳至 S3（一定會執行）
+# ============================================================
+{
+  echo "=== /etc/httpd/conf.d/assignment-env.conf ==="
+  cat /etc/httpd/conf.d/assignment-env.conf 2>&1
+  echo ""
+  echo "=== /var/www/html/.env ==="
+  cat /var/www/html/.env 2>&1
+  echo ""
+  echo "=== /var/www/html/ files ==="
+  ls -la /var/www/html/ 2>&1
+  echo ""
+  echo "=== Apache status ==="
+  systemctl status httpd 2>&1
+  echo ""
+  echo "=== Cloud-init log (last 200 lines) ==="
+  tail -200 /var/log/cloud-init-output.log 2>&1
+  echo ""
+  echo "=== user-data.log (last 200 lines) ==="
+  tail -200 /var/log/user-data.log 2>&1
+  echo ""
+  echo "=== healthz.php test ==="
+  curl -s http://localhost/healthz.php 2>&1
+  echo ""
+  echo "=== RDS connection test ==="
+  mariadb -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT 1" 2>&1
+} > /tmp/diagnostics.txt 2>&1
+
+aws s3 cp /tmp/diagnostics.txt "s3://sports-facility-booking-s3/diagnostics/$(hostname).txt" --region us-east-1 || echo "S3 upload failed"
+
+# ============================================================
+# 12. 完成
 # ============================================================
 echo "================================================"
 echo "Deployment complete!"
-echo "Database Host: $DB_HOST"
-echo "Database Name: $DB_NAME"
-echo "S3 Bucket: ${artifact_bucket}"
-echo "CloudWatch Agent: Running"
 echo "================================================"

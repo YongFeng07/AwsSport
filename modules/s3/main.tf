@@ -1,100 +1,68 @@
-# ============================================================
-# S3 Bucket 
-# ============================================================
+# assignment-s3-uploads: holds event photo uploads. Bucket ACLs stay blocked;
+# only unauthenticated GetObject under uploads/* is allowed via bucket policy so
+# images render in the browser, without allowing public listing or writes.
 
-resource "aws_s3_bucket" "uploads" {
-  bucket        = "sports-facility-booking-s3"
-  force_destroy = true
+resource "terraform_data" "uploads" {
+  input = var.bucket_name
 
-  tags = {
-    Name        = "sports-facility-booking-s3"
-    Environment = "sandbox"
-    Project     = "sports-facility-booking"
+  provisioner "local-exec" {
+    command = "aws s3api create-bucket --bucket ${var.bucket_name} --region us-east-1"
   }
 
-  lifecycle {
-    ignore_changes = [
-      object_lock_configuration,
-    ]
+  provisioner "local-exec" {
+    command = "aws s3api put-bucket-tagging --bucket ${var.bucket_name} --tagging TagSet=[{Key=Name,Value=${var.name_prefix}-s3-uploads}]"
   }
-}
 
-# ============================================================
-# Object Ownership — 
-# ============================================================
-resource "aws_s3_bucket_ownership_controls" "uploads" {
-  bucket = aws_s3_bucket.uploads.id
-  rule {
-    object_ownership = "ObjectWriter"  # ACLs enabled
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws s3 rm s3://${self.input} --recursive"
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws s3api delete-bucket --bucket ${self.input} --region us-east-1"
   }
 }
 
-# ============================================================
-# Block Public Access — 
-# ============================================================
-resource "aws_s3_bucket_public_access_block" "public_access" {
-  bucket = aws_s3_bucket.uploads.id
+resource "aws_s3_bucket_public_access_block" "uploads" {
+  bucket = var.bucket_name
 
-  block_public_acls       = false
+  depends_on = [terraform_data.uploads]
+
+  block_public_acls       = true
+  ignore_public_acls      = true
   block_public_policy     = false
-  ignore_public_acls      = false
   restrict_public_buckets = false
 }
 
-# ============================================================
-# Bucket Policy 
-# ===========================================================
-data "aws_caller_identity" "current" {}
-
-resource "aws_s3_bucket_policy" "allow_public" {
-  bucket = aws_s3_bucket.uploads.id
-
-  depends_on = [aws_s3_bucket_public_access_block.public_access]
+resource "aws_s3_bucket_policy" "public_read" {
+  bucket = var.bucket_name
 
   policy = jsonencode({
-    Version = "2008-10-17"
+    Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "AllowPublicRead"
+        Sid       = "PublicReadEventImages"
         Effect    = "Allow"
-        Principal = { AWS = "*" }
+        Principal = "*"
         Action    = "s3:GetObject"
-        Resource  = "${aws_s3_bucket.uploads.arn}/*"
-      },
-      {
-        Sid       = "AllowPublicWrite"
-        Effect    = "Allow"
-        Principal = { AWS = "*" }
-        Action    = "s3:PutObject"
-        Resource  = "${aws_s3_bucket.uploads.arn}/*"
+        Resource  = "arn:aws:s3:::${var.bucket_name}/${var.public_read_prefix}"
       }
     ]
   })
+
+  depends_on = [terraform_data.uploads, aws_s3_bucket_public_access_block.uploads]
 }
 
-# ============================================================
-# Default Encryption 
-# ============================================================
-resource "aws_s3_bucket_server_side_encryption_configuration" "uploads" {
-  bucket = aws_s3_bucket.uploads.id
+resource "aws_s3_bucket_cors_configuration" "uploads" {
+  bucket = var.bucket_name
 
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-    bucket_key_enabled = true
+  depends_on = [terraform_data.uploads]
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["GET"]
+    allowed_origins = ["*"]
+    max_age_seconds = 3000
   }
-}
-
-# ============================================================
-# Outputs
-# ============================================================
-output "bucket_id" {
-  description = "The ID/Name of the S3 bucket"
-  value       = aws_s3_bucket.uploads.id
-}
-
-output "bucket_arn" {
-  description = "The ARN of the S3 bucket"
-  value       = aws_s3_bucket.uploads.arn
 }
