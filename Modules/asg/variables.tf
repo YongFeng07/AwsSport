@@ -38,11 +38,15 @@ variable "instance_profile_name" {
 variable "secret_arn" {
   type        = string
   description = "Secrets Manager Secret ARN"
+  default     = ""
+  nullable    = true
 }
 
 variable "artifact_bucket" {
   type        = string
   description = "S3 Bucket Name for deployment artifact"
+  default     = ""
+  nullable    = true
 }
 
 variable "artifact_key" {
@@ -79,4 +83,10 @@ variable "cpu_target_value" {
   type        = number
   default     = 70.0
   description = "Target CPU utilization percentage"
+}
+
+variable "key_name" {
+  description = "Name of the EC2 Key Pair for SSH access"
+  type        = string
+  default     = ""
 }

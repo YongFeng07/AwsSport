@@ -1,6 +1,3 @@
-provider "aws" {
-  region = var.aws_region
-}
 
 # 1. VPC 模块
 module "vpc" {
@@ -24,7 +21,7 @@ module "security_groups" {
 module "s3" {
   source      = "./modules/s3"
   name_prefix = var.name_prefix
-  bucket_name = "sports-facility-booking-s3-uploads"
+  bucket_name = "sports-facility-booking-s3"
 }
 
 # 4. ALB 负载均衡模块
@@ -57,7 +54,6 @@ module "secrets" {
   db_username = "admin"
   db_password = var.db_password
 }
-
 # 7. ASG 弹性伸缩组模块
 module "asg" {
   source             = "./modules/asg"
@@ -67,6 +63,7 @@ module "asg" {
   ec2_sg_id          = module.security_groups.ec2_sg_id
   target_group_arn   = module.alb.target_group_arn
   instance_type      = "t3.micro"
+  key_name           = aws_key_pair.this.key_name 
   secret_arn         = module.secrets.secret_arn
   artifact_bucket    = module.s3.bucket_id
   aws_region         = var.aws_region

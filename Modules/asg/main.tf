@@ -13,16 +13,16 @@ data "aws_ami" "amazon_linux" {
   }
 }
 
-# 引用预置的 IAM Instance Profile (适合 Learner Lab 环境)
 data "aws_iam_instance_profile" "lab" {
   name = var.instance_profile_name
 }
 
-# 1. EC2 启动模板
+# 1. EC2 啟動範本
 resource "aws_launch_template" "app" {
   name_prefix   = "sports-facility-booking-lt-"
   image_id      = data.aws_ami.amazon_linux.id
   instance_type = var.instance_type
+  key_name      = var.key_name
 
   vpc_security_group_ids = [var.ec2_sg_id]
 
@@ -87,7 +87,7 @@ resource "aws_autoscaling_group" "app" {
 
   tag {
     key                 = "App"
-    value               = "sports-facility-bookingg"
+    value               = "sports-facility-booking"  # ← 修正拼寫
     propagate_at_launch = true
   }
 
@@ -96,7 +96,7 @@ resource "aws_autoscaling_group" "app" {
   }
 }
 
-# 3. CPU 自动伸缩策略
+# 3. CPU 自動伸縮策略
 resource "aws_autoscaling_policy" "cpu_target_tracking" {
   name                   = "sports-facility-booking-asg-cpu-scaling"
   autoscaling_group_name = aws_autoscaling_group.app.name
@@ -110,12 +110,12 @@ resource "aws_autoscaling_policy" "cpu_target_tracking" {
   }
 }
 
-# 4. SNS 通知主题 (新增)
+# 4. SNS 通知主題
 resource "aws_sns_topic" "asg_updates" {
   name = "sports-facility-booking-asg-topic"
 }
 
-# 5. ASG 通知绑定 (新增)
+# 5. ASG 通知綁定
 resource "aws_autoscaling_notification" "asg_notifications" {
   group_names = [aws_autoscaling_group.app.name]
 
@@ -127,4 +127,80 @@ resource "aws_autoscaling_notification" "asg_notifications" {
   ]
 
   topic_arn = aws_sns_topic.asg_updates.arn
+}
+
+# ============================================================
+# CloudWatch Log Groups
+# ============================================================
+resource "aws_cloudwatch_log_group" "apache_access" {
+  name              = "/aws/ec2/sports-facility-booking/apache-access"
+  retention_in_days = 7
+
+  tags = {
+    Name = "sports-facility-booking-apache-access"
+  }
+}
+
+resource "aws_cloudwatch_log_group" "apache_error" {
+  name              = "/aws/ec2/sports-facility-booking/apache-error"  # ← 改為 apache-error
+  retention_in_days = 7
+
+  tags = {
+    Name = "sports-facility-booking-apache-error"
+  }
+}
+
+# ============================================================
+# CloudWatch Dashboard
+# ============================================================
+resource "aws_cloudwatch_dashboard" "main" {
+  dashboard_name = "sports-facility-booking-dashboard"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type = "metric"
+        properties = {
+          metrics = [
+            ["AWS/EC2", "CPUUtilization", { stat = "Average" }],
+            ["AWS/ApplicationELB", "RequestCount", { stat = "Sum" }],
+            ["AWS/RDS", "DatabaseConnections", { stat = "Average" }]
+          ]
+          period = 300
+          stat   = "Average"
+          region = "us-east-1"
+          title  = "Sports Facility Booking - Key Metrics"
+        }
+      }
+    ]
+  })
+}
+
+# ============================================================
+# SNS Email 訂閱
+# ============================================================
+resource "aws_sns_topic_subscription" "email" {
+  topic_arn = aws_sns_topic.asg_updates.arn
+  protocol  = "email"
+  endpoint  = "wongyf-wm25@student.tarc.edu.my"
+}
+
+# ============================================================
+# CloudWatch Alarm - High CPU
+# ============================================================
+resource "aws_cloudwatch_metric_alarm" "high_cpu" {
+  alarm_name          = "sports-facility-booking-high-cpu"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "GroupAverageCPUUtilization"  # ← 修正為 ASG 指標
+  namespace           = "AWS/AutoScaling"              # ← 修正為 AutoScaling
+  period              = 300
+  statistic           = "Average"
+  threshold           = 70
+  alarm_description   = "EC2 CPU usage exceeds 70%"
+  alarm_actions       = [aws_sns_topic.asg_updates.arn]
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.app.name
+  }
 }

@@ -17,13 +17,13 @@ output "rds_endpoint" {
 }
 
 # S3 上传存储桶名称
-output "s3_bucket_name" {
-  description = "Name of the S3 bucket for uploads"
-  value       = module.s3.bucket_id
-}
+# output "s3_bucket_name" {
+#   description = "Name of the S3 bucket for uploads"
+#   value       = module.s3.bucket_id
+# }
 
 # Secrets Manager 密钥 ARN
-output "secret_arn" {
-  description = "ARN of the Secrets Manager secret"
-  value       = module.secrets.secret_arn
-}
+# output "secret_arn" {
+#   description = "ARN of the Secrets Manager secret"
+#   value       = module.secrets.secret_arn
+# }

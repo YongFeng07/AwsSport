@@ -1,17 +1,37 @@
+# ============================================================
+# S3 Bucket 
+# ============================================================
 
 resource "aws_s3_bucket" "uploads" {
-  bucket        = var.bucket_name
+  bucket        = "sports-facility-booking-s3"
   force_destroy = true
 
   tags = {
-    Name        = var.bucket_name
+    Name        = "sports-facility-booking-s3"
     Environment = "sandbox"
     Project     = "sports-facility-booking"
   }
+
+  lifecycle {
+    ignore_changes = [
+      object_lock_configuration,
+    ]
+  }
 }
 
+# ============================================================
+# Object Ownership — 
+# ============================================================
+resource "aws_s3_bucket_ownership_controls" "uploads" {
+  bucket = aws_s3_bucket.uploads.id
+  rule {
+    object_ownership = "ObjectWriter"  # ACLs enabled
+  }
+}
 
-# Unblocks public access settings so we can apply a bucket policy.
+# ============================================================
+# Block Public Access — 
+# ============================================================
 resource "aws_s3_bucket_public_access_block" "public_access" {
   bucket = aws_s3_bucket.uploads.id
 
@@ -21,13 +41,13 @@ resource "aws_s3_bucket_public_access_block" "public_access" {
   restrict_public_buckets = false
 }
 
-
+# ============================================================
+# Bucket Policy 
+# ===========================================================
 data "aws_caller_identity" "current" {}
 
-
-resource "aws_s3_bucket_policy" "allow_ec2_access" {
+resource "aws_s3_bucket_policy" "allow_public" {
   bucket = aws_s3_bucket.uploads.id
-
 
   depends_on = [aws_s3_bucket_public_access_block.public_access]
 
@@ -35,22 +55,40 @@ resource "aws_s3_bucket_policy" "allow_ec2_access" {
     Version = "2008-10-17"
     Statement = [
       {
-        Sid = "AllowEC2Access"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/LabInstanceProfile"
-        }
-        Action = [
-          "s3:PutObject",
-          "s3:GetObject",
-          "s3:DeleteObject"
-        ]
-        Resource = "${aws_s3_bucket.uploads.arn}/*"
+        Sid       = "AllowPublicRead"
+        Effect    = "Allow"
+        Principal = { AWS = "*" }
+        Action    = "s3:GetObject"
+        Resource  = "${aws_s3_bucket.uploads.arn}/*"
+      },
+      {
+        Sid       = "AllowPublicWrite"
+        Effect    = "Allow"
+        Principal = { AWS = "*" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.uploads.arn}/*"
       }
     ]
   })
 }
 
+# ============================================================
+# Default Encryption 
+# ============================================================
+resource "aws_s3_bucket_server_side_encryption_configuration" "uploads" {
+  bucket = aws_s3_bucket.uploads.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+# ============================================================
+# Outputs
+# ============================================================
 output "bucket_id" {
   description = "The ID/Name of the S3 bucket"
   value       = aws_s3_bucket.uploads.id

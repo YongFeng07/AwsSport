@@ -2,8 +2,8 @@
 # needs subnets in >= 2 AZs (an AWS hard requirement) even though the instance
 # itself is single-AZ per the assignment's own assumptions.
 resource "aws_db_subnet_group" "this" {
-  name       = "sports-facility-booking-db-subnet-group"
-  subnet_ids = var.private_subnet_ids
+  name        = "sports-facility-booking-db-subnet-group"
+  subnet_ids  = var.private_subnet_ids
 
   tags = {
     Name = "sports-facility-booking-db-subnet-group"
@@ -29,35 +29,46 @@ resource "aws_db_instance" "this" {
   multi_az            = false
   publicly_accessible = false
 
+  storage_encrypted = true
+
+
   # Sandbox environment: prioritize cheap/disposable over durability.
   skip_final_snapshot     = true
   backup_retention_period = 1
   deletion_protection     = false
   apply_immediately       = true
 
+  # CloudWatch monitoring (disabled due to IAM permissions in Learner Lab)
+  # monitoring_interval = 60
+  # monitoring_role_arn = aws_iam_role.rds_monitoring.arn
+
   tags = {
     Name = "sports-facility-booking-rds"
   }
 }
-# modules/rds/main.tf
-resource "aws_iam_role" "rds_monitoring" {
-  name = "sports-facility-booking-rds-monitoring-role"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "monitoring.rds.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
 
-resource "aws_iam_role_policy_attachment" "rds_monitoring" {
-  role       = aws_iam_role.rds_monitoring.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
-}
+# ==============================================================================
+# IAM Role for RDS Monitoring (DISABLED - Learner Lab lacks iam:CreateRole)
+# ==============================================================================
+# resource "aws_iam_role" "rds_monitoring" {
+#   name = "sports-facility-booking-rds-monitoring-role"
+#
+#   assume_role_policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [
+#       {
+#         Action = "sts:AssumeRole"
+#         Effect = "Allow"
+#         Principal = {
+#           Service = "monitoring.rds.amazonaws.com"
+#         }
+#       }
+#     ]
+#   })
+# }
+#
+# resource "aws_iam_role_policy_attachment" "rds_monitoring" {
+#   role       = aws_iam_role.rds_monitoring.name
+#   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+# }
